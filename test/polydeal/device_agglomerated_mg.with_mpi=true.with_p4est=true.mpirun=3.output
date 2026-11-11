@@ -13,7 +13,13 @@ Level 4: 4096 DoFs, 79872 nonzeros
 Host   CG+MG: 15 iterations, residual 1.24e-11
 Device CG+MG: 15 iterations, residual 1.24e-11
 Same iteration count: yes
+Device CG+MG, matrix-free fine level: 15 iterations, residual 1.24e-11
+Same iteration count: yes
+Device CG+MG, batched matrix-free fine level: 15 iterations, residual 1.24e-11
+Same iteration count: yes
 Solutions agree: OK
+Solutions agree (matrix-free fine level): OK
+Solutions agree (batched matrix-free fine level): OK
 *** dim=2, degree=2, ranks=3 ***
 Total number of available levels: 4
 Starting level: 1
@@ -29,4 +35,10 @@ Level 4: 9216 DoFs, 404352 nonzeros
 Host   CG+MG: 16 iterations, residual 4.05e-12
 Device CG+MG: 16 iterations, residual 4.05e-12
 Same iteration count: yes
+Device CG+MG, matrix-free fine level: 16 iterations, residual 4.05e-12
+Same iteration count: yes
+Device CG+MG, batched matrix-free fine level: 16 iterations, residual 4.05e-12
+Same iteration count: yes
 Solutions agree: OK
+Solutions agree (matrix-free fine level): OK
+Solutions agree (batched matrix-free fine level): OK

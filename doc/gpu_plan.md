@@ -1,6 +1,6 @@
 # GPU integration plan for polyDEAL
 
-Status: November 2026. Phases 0-2 are implemented on branch `gpu/phase1-device-csr`: `DeviceCSRMatrix` (`include/device_sparse_matrix.h`, test `device_csr_vmult`), the matrix-type-generic `MGTransferAgglomeration`, a device-aware `Utils::MGCoarseDirect`, the test `device_agglomerated_mg` and the example `examples/agglo_mg_device.cc`. Phases 3-4 are proposals.
+Status: November 2026. Phases 0-3 are implemented on branch `gpu/phase1-device-csr`: `DeviceCSRMatrix` (`include/device_sparse_matrix.h`, test `device_csr_vmult`), the matrix-type-generic `MGTransferAgglomeration`, a device-aware `Utils::MGCoarseDirect`, the batched sum-factorised `PortableDG::LaplaceOperatorDG` (`include/portable/`, kernels taken from dealiiX-portable-multigrid) as the matrix-free fine level, the point-wise `DeviceDGOperator` (`include/device_dg_operator.h`, kept for the polytopal case), the tests `device_dg_operator` and `device_agglomerated_mg`, and the example `examples/agglo_mg_device.cc`. Phase 4 is a proposal.
 
 ## 1. Verified starting point
 
@@ -100,13 +100,49 @@ Why not Tpetra: all local Trilinos builds have Tpetra OFF and a GPU-enabled Tril
 * Test `test/polydeal/device_agglomerated_mg.cc` (mpirun=3): same R-tree levels as `coarse_operator_from_matrix_free.cc`; check that CG+MG converges to the same residual with the same iteration count as the host pipeline (numdiff tolerance on the residual).
 * Deliverable: a V-cycle whose only host work is the coarse direct solve.
 
-### Phase 3: matrix-free fine level on device (3-4 weeks, research-adjacent)
+### Phase 3: matrix-free fine level on device (implemented)
 
-Blocked by the missing face loop in `Portable::MatrixFree`. Options, in order of preference:
+`Portable::MatrixFree` has no face loops, so the fine SIP-DG operator comes from the batched Kokkos kernels of the
+dealiiX-portable-multigrid project (`include/kernels/laplace_dg_kokkos_kernels.h` there), copied into
+`include/portable/dg_kokkos_kernels.h` with only a namespace rename and reformatting. The host side was rewritten
+as `PortableDG::LaplaceOperatorDG<dim, degree, Number>` in `include/portable/laplace_operator_dg.h`:
 
-a. **Hybrid**: cell terms through `Portable::MatrixFree::cell_loop` with `Portable::FEEvaluation` (FE_DGQ is a tensor-product element, so it is supported), face/penalty terms through a custom Kokkos kernel. The host `MatrixFree::get_face_info()` already enumerates interior/boundary faces with cell pairs, orientations and the face quadrature; flatten that into views (face -> cell_m, cell_p, face_no_m, face_no_p, normal, JxW per q-point, 1D shape values on the face) and write the SIP flux kernel by hand. One kernel per face writes to both cells; use colouring or atomics.
-b. **Face matrix**: assemble only the face coupling blocks into a `DeviceCSRMatrix` and keep cell terms matrix-free. Roughly halves memory versus the full matrix and reuses Phase 1.
-c. **Upstream**: contribute face support to `Portable::MatrixFree`. Largest payoff, longest timeline.
+* **Kernels unchanged.** Sum-factorised cell evaluation in collocation form, batches of cells per team sized from a
+  shared-memory budget, face traces of `u` and `dn u` computed once per cell and consumed by separate interior- and
+  boundary-face kernels, then tested back with the cell basis. Interior faces are visited once; the rows of ghost
+  cells are written and discarded (`zero_out_ghost_values()`), so no `compress()` is needed.
+* **Host side decoupled.** The operator needs only a `Mapping` and a `DoFHandler`: the partitioner is built from
+  the locally owned and relevant DoFs, shape data comes from deal.II's `ShapeInfo`, there is no `MatrixFree`
+  object, no constraints and no operator base classes. It offers the same plain interface as `DeviceCSRMatrix`
+  (`vmult`, `vmult_add`, `Tvmult`, `initialize_dof_vector`, `get_domain_partitioner`, `get_diagonal`,
+  `get_inverse_diagonal`, `m`, `n`, `el`), copies vectors into its layout when theirs differs, and checks at setup
+  that both sides of every face see the same quadrature points (non-standard face orientation is not supported).
+* **Penalty convention.** The original kernels use sigma = p(p+1)/2 (1/h_- + 1/h_+) with h = |cell|/|face|
+  (`PenaltyConvention::cell_extent`). Polydeal's host operator and hence the Galerkin-projected coarse levels use
+  the step-59 form, which is exactly twice that on Cartesian cells. `PenaltyConvention::step59` (the default)
+  reproduces the host operator to rounding on general meshes, so the fine level is consistent with the hierarchy.
+  All boundary faces are Dirichlet by default, as in the host operator.
+* **Diagonal.** The exact SIP diagonal (cell and face terms) is assembled on the host at setup and copied over;
+  the original `compute_diagonal()` covered cell terms only.
+* **Verification** (`device_dg_operator`, 3 ranks, Cartesian and randomly distorted meshes, 2D and 3D, p = 1, 2):
+  products, transposed and accumulating products, foreign-layout source and destination, ghosted source, diagonal
+  and inverse diagonal against the assembled Trilinos matrix at 1e-11; for the `cell_extent` convention symmetry,
+  positivity and the identity A_step59 - A_extent = penalty difference assembled on the host.
+* **In the V-cycle** (`device_agglomerated_mg`, `agglo_mg_device.cc`): wrapped in `LinearOperatorMG` next to the
+  `DeviceCSRMatrix` coarse levels; iteration counts and residuals identical to the host pipeline.
+
+`DeviceDGOperator` (`include/device_dg_operator.h`), the first attempt written before the batched kernels were
+known, stays in the repository for one reason: it evaluates the basis at arbitrary stored reference points, which
+the polytopal operator of Phase 4 needs and sum factorisation cannot provide. It is not the fine level of choice.
+
+Measured in `agglo_mg_device.cc` (3D, p=2, 4096 cells, 110592 DoFs, 3 ranks, OpenMP Kokkos backend, one thread
+per team):
+
+| fine level | device storage | CG+MG time |
+|---|---|---|
+| assembled matrix (+ transpose) | 454 MiB | 1.65 s |
+| `DeviceDGOperator` (point-wise) | 59 MiB | 6.6 s |
+| `PortableDG::LaplaceOperatorDG` (batched) | 18 MiB | 0.78 s |
 
 ### Phase 4: polytopal operator on device (open-ended)
 
@@ -128,7 +164,7 @@ Nonzeros per cell for SIP-DG with FE_DGQ(p) in 3D: `(p+1)^3 * (p+1)^3 * 7` (self
 | 2 | 27 | 5103 | 61 kB |
 | 3 | 64 | 28672 | 344 kB |
 
-At p=2, 1M fine cells need about 61 GB for the fine matrix alone, more than one GPU. This is why Phase 3 matters for 3D and higher order, and why Phase 1 is only a stepping stone there.
+At p=2, 1M fine cells need about 61 GB for the fine matrix alone, more than one GPU. This is why Phase 3 matters for 3D and higher order, and why Phase 1 is only a stepping stone there. Phase 3 brings the fine level down to 59 MiB in the measured case.
 
 ## 6. Risks and open questions
 
@@ -144,7 +180,11 @@ At p=2, 1M fine cells need about 61 GB for the fine matrix alone, more than one 
 |---|---|
 | `include/device_sparse_matrix.h` | new: `DeviceCSRMatrix` |
 | `include/multigrid_amg.h`, `source/multigrid_amg.cc` | generalise `MGTransferAgglomeration` over matrix type, add device instantiation |
-| `include/utils.h` | device `MGCoarseDirect`; later the hybrid device DG operator |
+| `include/utils.h` | device `MGCoarseDirect` |
+| `include/portable/dg_kokkos_kernels.h` | copied batched kernels (dealiiX-portable-multigrid) |
+| `include/portable/laplace_operator_dg.h` | new: `PortableDG::LaplaceOperatorDG`, the matrix-free fine level |
+| `include/device_dg_operator.h` | new: point-wise `DeviceDGOperator`, kept for Phase 4 |
+| `test/polydeal/device_dg_operator.cc` + `.output` | new test |
 | `examples/agglo_mg_device.cc` | new example |
 | `test/polydeal/device_csr_vmult.cc`, `device_agglomerated_mg.cc` + `.output` | new tests |
 | `README.md` | document CPU/GPU build expectations |

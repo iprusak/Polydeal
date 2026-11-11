@@ -1,0 +1,148 @@
+*** dim=2, degree=1, Cartesian, ranks=3 ***
+Cells: 256, DoFs: 1024
+Device operator data: 320352 bytes; assembled matrix values + indices: 233472 bytes
+vmult vs host matrix-free: OK
+vmult vs assembled matrix: OK
+vmult with plain source: OK
+vmult_add: OK
+Tvmult: OK
+diagonal: OK
+inverse diagonal: OK
+-- PortableDG::LaplaceOperatorDG, step59 penalty --
+cells with ghosts: 102, owned: 85; device data 142044 bytes
+vmult vs host matrix-free: OK
+vmult vs assembled matrix: OK
+vmult with plain source and destination: OK
+vmult_add: OK
+Tvmult: OK
+vmult with ghosted source: OK
+diagonal: OK
+inverse diagonal: OK
+diagonal in operator layout: OK
+-- PortableDG::LaplaceOperatorDG, cell_extent penalty --
+symmetry: OK
+positivity: OK
+A_59 - A_ext equals the penalty difference: OK
+*** dim=2, degree=2, Cartesian, ranks=3 ***
+Cells: 256, DoFs: 2304
+Device operator data: 521076 bytes; assembled matrix values + indices: 1181952 bytes
+vmult vs host matrix-free: OK
+vmult vs assembled matrix: OK
+vmult with plain source: OK
+vmult_add: OK
+Tvmult: OK
+diagonal: OK
+inverse diagonal: OK
+-- PortableDG::LaplaceOperatorDG, step59 penalty --
+cells with ghosts: 102, owned: 85; device data 230976 bytes
+vmult vs host matrix-free: OK
+vmult vs assembled matrix: OK
+vmult with plain source and destination: OK
+vmult_add: OK
+Tvmult: OK
+vmult with ghosted source: OK
+diagonal: OK
+inverse diagonal: OK
+diagonal in operator layout: OK
+-- PortableDG::LaplaceOperatorDG, cell_extent penalty --
+symmetry: OK
+positivity: OK
+A_59 - A_ext equals the penalty difference: OK
+*** dim=2, degree=2, distorted, ranks=3 ***
+Cells: 256, DoFs: 2304
+Device operator data: 521076 bytes; assembled matrix values + indices: 1181952 bytes
+vmult vs host matrix-free: OK
+vmult vs assembled matrix: OK
+vmult with plain source: OK
+vmult_add: OK
+Tvmult: OK
+diagonal: OK
+inverse diagonal: OK
+-- PortableDG::LaplaceOperatorDG, step59 penalty --
+cells with ghosts: 102, owned: 85; device data 230976 bytes
+vmult vs host matrix-free: OK
+vmult vs assembled matrix: OK
+vmult with plain source and destination: OK
+vmult_add: OK
+Tvmult: OK
+vmult with ghosted source: OK
+diagonal: OK
+inverse diagonal: OK
+diagonal in operator layout: OK
+-- PortableDG::LaplaceOperatorDG, cell_extent penalty --
+symmetry: OK
+positivity: OK
+*** dim=3, degree=1, Cartesian, ranks=3 ***
+Cells: 64, DoFs: 512
+Device operator data: 405904 bytes; assembled matrix values + indices: 270336 bytes
+vmult vs host matrix-free: OK
+vmult vs assembled matrix: OK
+vmult with plain source: OK
+vmult_add: OK
+Tvmult: OK
+diagonal: OK
+inverse diagonal: OK
+-- PortableDG::LaplaceOperatorDG, step59 penalty --
+cells with ghosts: 40, owned: 21; device data 166016 bytes
+vmult vs host matrix-free: OK
+vmult vs assembled matrix: OK
+vmult with plain source and destination: OK
+vmult_add: OK
+Tvmult: OK
+vmult with ghosted source: OK
+diagonal: OK
+inverse diagonal: OK
+diagonal in operator layout: OK
+-- PortableDG::LaplaceOperatorDG, cell_extent penalty --
+symmetry: OK
+positivity: OK
+A_59 - A_ext equals the penalty difference: OK
+*** dim=3, degree=2, Cartesian, ranks=3 ***
+Cells: 64, DoFs: 1728
+Device operator data: 971820 bytes; assembled matrix values + indices: 3079296 bytes
+vmult vs host matrix-free: OK
+vmult vs assembled matrix: OK
+vmult with plain source: OK
+vmult_add: OK
+Tvmult: OK
+diagonal: OK
+inverse diagonal: OK
+-- PortableDG::LaplaceOperatorDG, step59 penalty --
+cells with ghosts: 40, owned: 21; device data 421156 bytes
+vmult vs host matrix-free: OK
+vmult vs assembled matrix: OK
+vmult with plain source and destination: OK
+vmult_add: OK
+Tvmult: OK
+vmult with ghosted source: OK
+diagonal: OK
+inverse diagonal: OK
+diagonal in operator layout: OK
+-- PortableDG::LaplaceOperatorDG, cell_extent penalty --
+symmetry: OK
+positivity: OK
+A_59 - A_ext equals the penalty difference: OK
+*** dim=3, degree=2, distorted, ranks=3 ***
+Cells: 64, DoFs: 1728
+Device operator data: 971820 bytes; assembled matrix values + indices: 3079296 bytes
+vmult vs host matrix-free: OK
+vmult vs assembled matrix: OK
+vmult with plain source: OK
+vmult_add: OK
+Tvmult: OK
+diagonal: OK
+inverse diagonal: OK
+-- PortableDG::LaplaceOperatorDG, step59 penalty --
+cells with ghosts: 40, owned: 21; device data 421156 bytes
+vmult vs host matrix-free: OK
+vmult vs assembled matrix: OK
+vmult with plain source and destination: OK
+vmult_add: OK
+Tvmult: OK
+vmult with ghosted source: OK
+diagonal: OK
+inverse diagonal: OK
+diagonal in operator layout: OK
+-- PortableDG::LaplaceOperatorDG, cell_extent penalty --
+symmetry: OK
+positivity: OK

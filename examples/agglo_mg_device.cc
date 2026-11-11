@@ -18,7 +18,10 @@
 // then copied once into a DeviceCSRMatrix, and the complete V-cycle
 // (Chebyshev smoother, transfers, outer CG) operates on
 // LinearAlgebra::distributed::Vector<double, MemorySpace::Default>. Only the
-// coarsest level is solved on the host by a direct solver.
+// coarsest level is solved on the host by a direct solver. The device solve is
+// run three times: with the assembled fine matrix, with the matrix-free
+// DeviceDGOperator, and with the batched sum-factorised
+// PortableDG::LaplaceOperatorDG on the finest level.
 //
 // With a deal.II built on a Serial or OpenMP Kokkos backend the "device" is
 // the host, and this example then measures the CSR kernels against Trilinos.
@@ -48,9 +51,11 @@
 
 #include <agglomeration_handler.h>
 #include <agglomerator.h>
+#include <device_dg_operator.h>
 #include <device_sparse_matrix.h>
 #include <multigrid_amg.h>
 #include <poly_utils.h>
+#include <portable/laplace_operator_dg.h>
 #include <utils.h>
 
 using namespace dealii;
@@ -280,7 +285,124 @@ main(int argc, char *argv[])
     Timer                  solve_timer;
     cg.solve(level_dev[max_level], solution_dev, rhs_dev, preconditioner);
     solve_timer.stop();
-    pcout << "Device CG+MG: " << control.last_step() << " iterations, "
-          << solve_timer.wall_time() << " s" << std::endl;
+    pcout << "Device CG+MG (assembled fine level): " << control.last_step()
+          << " iterations, " << solve_timer.wall_time() << " s" << std::endl;
+
+    // -------------------------------------------------------------------
+    // Matrix-free finest level
+    // -------------------------------------------------------------------
+    Timer                                        mf_setup_timer;
+    DeviceDGOperator<dim, degree_finite_element> fine_mf;
+    fine_mf.reinit(mapping, dof_handler);
+    mf_setup_timer.stop();
+    const std::size_t mf_bytes =
+      Utilities::MPI::sum(fine_mf.memory_consumption(), comm);
+    const std::size_t fine_matrix_bytes =
+      Utilities::MPI::sum(level_dev[max_level].memory_consumption(), comm);
+    pcout << "Matrix-free fine operator set up in "
+          << mf_setup_timer.wall_time() << " s, device storage "
+          << mf_bytes / (1024. * 1024.) << " MiB (assembled fine matrix: "
+          << fine_matrix_bytes / (1024. * 1024.) << " MiB)" << std::endl;
+
+    using LevelOperator = LinearOperatorMG<DeviceVector, DeviceVector>;
+    MGLevelObject<LevelOperator> level_ops(0, max_level);
+    for (unsigned int l = 0; l < max_level; ++l)
+      {
+        level_ops[l] =
+          linear_operator_mg<DeviceVector, DeviceVector>(level_dev[l]);
+        level_ops[l].n_rows = level_dev[l].m();
+        level_ops[l].n_cols = level_dev[l].n();
+      }
+    level_ops[max_level] =
+      linear_operator_mg<DeviceVector, DeviceVector>(fine_mf);
+    level_ops[max_level].n_rows = fine_mf.m();
+    level_ops[max_level].n_cols = fine_mf.n();
+    mg::Matrix<DeviceVector> mg_matrix_mf(level_ops);
+
+    using SmootherMF = PreconditionChebyshev<LevelOperator, DeviceVector>;
+    mg::SmootherRelaxation<SmootherMF, DeviceVector>   mg_smoother_mf;
+    MGLevelObject<typename SmootherMF::AdditionalData> smoother_data_mf(
+      0, max_level);
+    DeviceVector fine_inverse_diagonal(dof_handler.locally_owned_dofs(), comm);
+    fine_mf.get_inverse_diagonal(fine_inverse_diagonal);
+    for (unsigned int l = 0; l <= max_level; ++l)
+      {
+        smoother_data_mf[l].preconditioner =
+          std::make_shared<DiagonalMatrix<DeviceVector>>(
+            l < max_level ? inverse_diagonals[l] : fine_inverse_diagonal);
+        smoother_data_mf[l].smoothing_range     = 20.;
+        smoother_data_mf[l].degree              = 3;
+        smoother_data_mf[l].eig_cg_n_iterations = 20;
+      }
+    mg_smoother_mf.set_steps(2);
+    mg_smoother_mf.initialize(level_ops, smoother_data_mf);
+
+    Multigrid<DeviceVector> mg_mf(
+      mg_matrix_mf, mg_coarse, mg_transfer, mg_smoother_mf, mg_smoother_mf);
+    PreconditionMG<dim, DeviceVector, TransferType> preconditioner_mf(
+      dof_handler, mg_mf, mg_transfer);
+
+    HostVector rhs_layout_mf(fine_mf.get_domain_partitioner());
+    rhs_layout_mf.copy_locally_owned_data_from(rhs);
+    DeviceVector rhs_mf, solution_mf;
+    fine_mf.initialize_dof_vector(rhs_mf);
+    fine_mf.initialize_dof_vector(solution_mf);
+    rhs_mf.import_elements(rhs_layout_mf, VectorOperation::insert);
+
+    SolverCG<DeviceVector> cg_mf(control);
+    Timer                  mf_solve_timer;
+    cg_mf.solve(fine_mf, solution_mf, rhs_mf, preconditioner_mf);
+    mf_solve_timer.stop();
+    pcout << "Device CG+MG (matrix-free fine level): " << control.last_step()
+          << " iterations, " << mf_solve_timer.wall_time() << " s" << std::endl;
+
+    // -------------------------------------------------------------------
+    // Batched sum-factorised finest level
+    // -------------------------------------------------------------------
+    Timer batched_setup_timer;
+    PortableDG::LaplaceOperatorDG<dim, degree_finite_element> fine_batched;
+    fine_batched.reinit(mapping, dof_handler);
+    batched_setup_timer.stop();
+    const std::size_t batched_bytes =
+      Utilities::MPI::sum(fine_batched.memory_consumption(), comm);
+    pcout << "Batched fine operator set up in "
+          << batched_setup_timer.wall_time() << " s, device storage "
+          << batched_bytes / (1024. * 1024.) << " MiB" << std::endl;
+
+    level_ops[max_level] =
+      linear_operator_mg<DeviceVector, DeviceVector>(fine_batched);
+    level_ops[max_level].n_rows = fine_batched.m();
+    level_ops[max_level].n_cols = fine_batched.n();
+    mg::Matrix<DeviceVector> mg_matrix_batched(level_ops);
+
+    mg::SmootherRelaxation<SmootherMF, DeviceVector> mg_smoother_batched;
+    fine_batched.get_inverse_diagonal(fine_inverse_diagonal);
+    smoother_data_mf[max_level].preconditioner =
+      std::make_shared<DiagonalMatrix<DeviceVector>>(fine_inverse_diagonal);
+    mg_smoother_batched.set_steps(2);
+    mg_smoother_batched.initialize(level_ops, smoother_data_mf);
+
+    Multigrid<DeviceVector> mg_batched(mg_matrix_batched,
+                                       mg_coarse,
+                                       mg_transfer,
+                                       mg_smoother_batched,
+                                       mg_smoother_batched);
+    PreconditionMG<dim, DeviceVector, TransferType> preconditioner_batched(
+      dof_handler, mg_batched, mg_transfer);
+
+    HostVector rhs_layout_b(fine_batched.get_domain_partitioner());
+    rhs_layout_b.copy_locally_owned_data_from(rhs);
+    DeviceVector rhs_b, solution_b;
+    fine_batched.initialize_dof_vector(rhs_b);
+    fine_batched.initialize_dof_vector(solution_b);
+    rhs_b.import_elements(rhs_layout_b, VectorOperation::insert);
+
+    SolverCG<DeviceVector> cg_b(control);
+    Timer                  batched_solve_timer;
+    cg_b.solve(fine_batched, solution_b, rhs_b, preconditioner_batched);
+    batched_solve_timer.stop();
+    pcout << "Device CG+MG (batched matrix-free fine level): "
+          << control.last_step() << " iterations, "
+          << batched_solve_timer.wall_time() << " s" << std::endl;
   }
 }

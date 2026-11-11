@@ -15,7 +15,9 @@
 // LinearAlgebra::distributed::Vector<double, MemorySpace::Default>. The level
 // matrices are Galerkin projections computed on the host with Trilinos and
 // copied once into DeviceCSRMatrix objects. The same V-cycle is run with host
-// vectors and Trilinos matrices, and the two CG solves are compared.
+// vectors and Trilinos matrices, and the two CG solves are compared. A third
+// run replaces the assembled fine matrix by the matrix-free DeviceDGOperator,
+// a fourth by the batched PortableDG::LaplaceOperatorDG.
 
 #include <deal.II/base/conditional_ostream.h>
 #include <deal.II/base/mpi.h>
@@ -40,9 +42,11 @@
 
 #include <agglomeration_handler.h>
 #include <agglomerator.h>
+#include <device_dg_operator.h>
 #include <device_sparse_matrix.h>
 #include <multigrid_amg.h>
 #include <poly_utils.h>
+#include <portable/laplace_operator_dg.h>
 #include <utils.h>
 
 #include <iomanip>
@@ -195,7 +199,7 @@ run(const MPI_Comm comm)
   // ---------------------------------------------------------------------
   // Device pipeline: DeviceCSRMatrix on every level, device vectors
   // ---------------------------------------------------------------------
-  DeviceVector solution_dev;
+  DeviceVector solution_dev, solution_mf, solution_batched;
   {
     using LevelMatrixType = DeviceCSRMatrix<double>;
     MGLevelObject<LevelMatrixType> level_dev(0, max_level);
@@ -260,6 +264,114 @@ run(const MPI_Comm comm)
     pcout << "Same iteration count: "
           << (control.last_step() == host_iterations ? "yes" : "no")
           << std::endl;
+
+    // -------------------------------------------------------------------
+    // Same V-cycle, but the finest level is the matrix-free device operator
+    // instead of the assembled matrix. The levels are wrapped in
+    // LinearOperatorMG so that the fine and coarse operators can be of
+    // different types.
+    // -------------------------------------------------------------------
+    DeviceDGOperator<dim, degree> fine_mf;
+    fine_mf.reinit(mapping, dof_handler);
+
+    using LevelOperator = LinearOperatorMG<DeviceVector, DeviceVector>;
+    MGLevelObject<LevelOperator> level_ops(0, max_level);
+    for (unsigned int l = 0; l < max_level; ++l)
+      {
+        level_ops[l] =
+          linear_operator_mg<DeviceVector, DeviceVector>(level_dev[l]);
+        level_ops[l].n_rows = level_dev[l].m();
+        level_ops[l].n_cols = level_dev[l].n();
+      }
+    level_ops[max_level] =
+      linear_operator_mg<DeviceVector, DeviceVector>(fine_mf);
+    level_ops[max_level].n_rows = fine_mf.m();
+    level_ops[max_level].n_cols = fine_mf.n();
+    mg::Matrix<DeviceVector> mg_matrix_mf(level_ops);
+
+    using SmootherMF = PreconditionChebyshev<LevelOperator, DeviceVector>;
+    mg::SmootherRelaxation<SmootherMF, DeviceVector>   mg_smoother_mf;
+    MGLevelObject<typename SmootherMF::AdditionalData> smoother_data_mf(
+      0, max_level);
+    DeviceVector fine_inverse_diagonal(dof_handler.locally_owned_dofs(), comm);
+    fine_mf.get_inverse_diagonal(fine_inverse_diagonal);
+    for (unsigned int l = 0; l <= max_level; ++l)
+      {
+        smoother_data_mf[l].preconditioner =
+          std::make_shared<DiagonalMatrix<DeviceVector>>(
+            l < max_level ? inverse_diagonals[l] : fine_inverse_diagonal);
+        smoother_data_mf[l].smoothing_range     = 20.;
+        smoother_data_mf[l].degree              = 3;
+        smoother_data_mf[l].eig_cg_n_iterations = 20;
+      }
+    mg_smoother_mf.set_steps(2);
+    mg_smoother_mf.initialize(level_ops, smoother_data_mf);
+
+    Multigrid<DeviceVector> mg_mf(
+      mg_matrix_mf, mg_coarse, mg_transfer, mg_smoother_mf, mg_smoother_mf);
+    PreconditionMG<dim, DeviceVector, TransferType> preconditioner_mf(
+      dof_handler, mg_mf, mg_transfer);
+
+    HostVector rhs_layout_mf(fine_mf.get_domain_partitioner());
+    rhs_layout_mf.copy_locally_owned_data_from(rhs);
+    DeviceVector rhs_mf;
+    fine_mf.initialize_dof_vector(rhs_mf);
+    rhs_mf.import_elements(rhs_layout_mf, VectorOperation::insert);
+    fine_mf.initialize_dof_vector(solution_mf);
+
+    SolverCG<DeviceVector> cg_mf(control);
+    cg_mf.solve(fine_mf, solution_mf, rhs_mf, preconditioner_mf);
+    pcout << "Device CG+MG, matrix-free fine level: " << control.last_step()
+          << " iterations, residual " << std::scientific << std::setprecision(2)
+          << control.last_value() << std::defaultfloat << std::endl;
+    pcout << "Same iteration count: "
+          << (control.last_step() == host_iterations ? "yes" : "no")
+          << std::endl;
+
+    // -------------------------------------------------------------------
+    // Same again with the batched sum-factorised operator on the finest
+    // level (step-59 penalty, so that it matches the projected levels).
+    // -------------------------------------------------------------------
+    PortableDG::LaplaceOperatorDG<dim, degree> fine_batched;
+    fine_batched.reinit(mapping, dof_handler);
+
+    level_ops[max_level] =
+      linear_operator_mg<DeviceVector, DeviceVector>(fine_batched);
+    level_ops[max_level].n_rows = fine_batched.m();
+    level_ops[max_level].n_cols = fine_batched.n();
+    mg::Matrix<DeviceVector> mg_matrix_batched(level_ops);
+
+    mg::SmootherRelaxation<SmootherMF, DeviceVector> mg_smoother_batched;
+    fine_batched.get_inverse_diagonal(fine_inverse_diagonal);
+    smoother_data_mf[max_level].preconditioner =
+      std::make_shared<DiagonalMatrix<DeviceVector>>(fine_inverse_diagonal);
+    mg_smoother_batched.set_steps(2);
+    mg_smoother_batched.initialize(level_ops, smoother_data_mf);
+
+    Multigrid<DeviceVector> mg_batched(mg_matrix_batched,
+                                       mg_coarse,
+                                       mg_transfer,
+                                       mg_smoother_batched,
+                                       mg_smoother_batched);
+    PreconditionMG<dim, DeviceVector, TransferType> preconditioner_batched(
+      dof_handler, mg_batched, mg_transfer);
+
+    HostVector rhs_layout_b(fine_batched.get_domain_partitioner());
+    rhs_layout_b.copy_locally_owned_data_from(rhs);
+    DeviceVector rhs_b;
+    fine_batched.initialize_dof_vector(rhs_b);
+    rhs_b.import_elements(rhs_layout_b, VectorOperation::insert);
+    fine_batched.initialize_dof_vector(solution_batched);
+
+    SolverCG<DeviceVector> cg_b(control);
+    cg_b.solve(fine_batched, solution_batched, rhs_b, preconditioner_batched);
+    pcout << "Device CG+MG, batched matrix-free fine level: "
+          << control.last_step() << " iterations, residual " << std::scientific
+          << std::setprecision(2) << control.last_value() << std::defaultfloat
+          << std::endl;
+    pcout << "Same iteration count: "
+          << (control.last_step() == host_iterations ? "yes" : "no")
+          << std::endl;
   }
 
   // Compare the two solutions
@@ -271,6 +383,22 @@ run(const MPI_Comm comm)
     diff -= solution_host;
     const double rel = diff.l2_norm() / solution_host.l2_norm();
     pcout << "Solutions agree: " << (rel < 1e-6 ? "OK" : "FAIL") << std::endl;
+
+    HostVector mf_on_host(solution_mf.get_partitioner());
+    mf_on_host.import_elements(solution_mf, VectorOperation::insert);
+    diff.copy_locally_owned_data_from(mf_on_host);
+    diff -= solution_host;
+    const double rel_mf = diff.l2_norm() / solution_host.l2_norm();
+    pcout << "Solutions agree (matrix-free fine level): "
+          << (rel_mf < 1e-6 ? "OK" : "FAIL") << std::endl;
+
+    HostVector b_on_host(solution_batched.get_partitioner());
+    b_on_host.import_elements(solution_batched, VectorOperation::insert);
+    diff.copy_locally_owned_data_from(b_on_host);
+    diff -= solution_host;
+    const double rel_b = diff.l2_norm() / solution_host.l2_norm();
+    pcout << "Solutions agree (batched matrix-free fine level): "
+          << (rel_b < 1e-6 ? "OK" : "FAIL") << std::endl;
   }
 }
 
