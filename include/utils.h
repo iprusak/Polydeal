@@ -14,6 +14,7 @@
 #ifndef utils_h
 #define utils_h
 
+#include <deal.II/base/memory_space.h>
 #include <deal.II/base/point.h>
 #include <deal.II/base/quadrature_lib.h>
 
@@ -283,6 +284,11 @@ namespace Utils
    * This means that SparseDirectUMFPACK supports only serial deal.II vectors,
    * while TrilinosWrappers::SolverDirect supports as parallel vector types:
    * LinearAlgebra::distributed::Vector and TrilinosWrappers::MPI::Vector.
+   *
+   * In addition, with TrilinosWrappers::SolverDirect the vector type may be
+   * LinearAlgebra::distributed::Vector<Number, MemorySpace::Default>. The
+   * coarse residual is then copied to the host, solved there, and the
+   * correction is copied back to the device.
    */
   template <typename VectorType, typename MatrixType, typename SolverType>
   class MGCoarseDirect : public MGCoarseGridBase<VectorType>
@@ -316,6 +322,10 @@ namespace Utils
             std::is_same_v<VectorType,
                            LinearAlgebra::distributed::Vector<
                              typename MatrixType::value_type>> ||
+            std::is_same_v<VectorType,
+                           LinearAlgebra::distributed::Vector<
+                             typename MatrixType::value_type,
+                             MemorySpace::Default>> ||
             std::is_same_v<VectorType, TrilinosWrappers::MPI::Vector>;
           Assert(is_supported_parallel_vector, ExcNotImplemented());
         }
@@ -339,7 +349,25 @@ namespace Utils
     {
       AssertDimension(coarse_matrix.n(), src.size());
       AssertDimension(coarse_matrix.m(), dst.size());
-      const_cast<SolverType &>(direct_solver).solve(dst, src);
+
+      using Number = typename MatrixType::value_type;
+      if constexpr (std::is_same_v<VectorType,
+                                   LinearAlgebra::distributed::
+                                     Vector<Number, MemorySpace::Default>>)
+        {
+          // Device vectors: round trip through host vectors with the same
+          // parallel layout. The coarse level is small, so this is cheap.
+          using HostVector = LinearAlgebra::distributed::Vector<Number>;
+          HostVector src_host(src.get_partitioner());
+          HostVector dst_host(dst.get_partitioner());
+          src_host.import_elements(src, VectorOperation::insert);
+          const_cast<SolverType &>(direct_solver).solve(dst_host, src_host);
+          dst.import_elements(dst_host, VectorOperation::insert);
+        }
+      else
+        {
+          const_cast<SolverType &>(direct_solver).solve(dst, src);
+        }
     }
 
 

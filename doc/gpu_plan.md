@@ -1,6 +1,6 @@
 # GPU integration plan for polyDEAL
 
-Status: November 2026. Phase 0 (baseline build) and Phase 1 (`DeviceCSRMatrix`, header `include/device_sparse_matrix.h`, test `test/polydeal/device_csr_vmult.cc`) are implemented on branch `gpu/phase1-device-csr`. Phases 2-4 are proposals.
+Status: November 2026. Phases 0-2 are implemented on branch `gpu/phase1-device-csr`: `DeviceCSRMatrix` (`include/device_sparse_matrix.h`, test `device_csr_vmult`), the matrix-type-generic `MGTransferAgglomeration`, a device-aware `Utils::MGCoarseDirect`, the test `device_agglomerated_mg` and the example `examples/agglo_mg_device.cc`. Phases 3-4 are proposals.
 
 ## 1. Verified starting point
 
@@ -132,7 +132,7 @@ At p=2, 1M fine cells need about 61 GB for the fine matrix alone, more than one 
 
 ## 6. Risks and open questions
 
-* `Multigrid`/`PreconditionMG` with `MemorySpace::Default` vectors: expected to work, not yet compiled.
+* `Multigrid`/`PreconditionMG` with `MemorySpace::Default` vectors: verified in `device_agglomerated_mg` (same iteration counts and residuals as the host pipeline at p=1 and p=2 on three ranks).
 * Ghost exchange of device vectors uses MPI from device buffers; without GPU-aware MPI deal.II stages through the host. Fine for correctness, matters for performance.
 * `Tvmult` via explicit transpose doubles transfer-matrix memory; acceptable because transfers are tall and thin.
 * Debug builds: polyDEAL builds a `.g` library. Kokkos bounds checking (`Kokkos_ENABLE_DEBUG_BOUNDS_CHECK`) in deal.II debug builds will slow device tests but catch indexing errors.

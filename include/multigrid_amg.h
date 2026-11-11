@@ -22,6 +22,7 @@
 #include <deal.II/fe/fe_dgq.h>
 
 #include <deal.II/lac/la_parallel_vector.h>
+#include <deal.II/lac/trilinos_sparse_matrix.h>
 
 #include <deal.II/matrix_free/operators.h>
 
@@ -441,7 +442,16 @@ namespace dealii
    * and DoFHandlers which identify the degrees of freedom on each level.
    *
    */
-  template <int dim, typename VectorType>
+  /**
+   * The template parameter @p MatrixType is the type of the two-level transfer
+   * matrices. The default, TrilinosWrappers::SparseMatrix, is used with host
+   * vectors; DeviceCSRMatrix together with
+   * LinearAlgebra::distributed::Vector<Number, MemorySpace::Default> moves the
+   * transfers to the device.
+   */
+  template <int dim,
+            typename VectorType,
+            typename MatrixType = TrilinosWrappers::SparseMatrix>
   class MGTransferAgglomeration : public MGTransferBase<VectorType>
   {
   public:
@@ -450,16 +460,15 @@ namespace dealii
      * agglomerated meshes.
      */
     MGTransferAgglomeration(
-      const MGLevelObject<TrilinosWrappers::SparseMatrix *> &transfer_matrices,
-      const std::vector<DoFHandler<dim> *>                  &dof_handlers);
+      const MGLevelObject<MatrixType *>    &transfer_matrices,
+      const std::vector<DoFHandler<dim> *> &dof_handlers);
 
     /**
-     * Same as above, but taking vectors of Trilinos::SparseMatrix objects,
+     * Same as above, but taking vectors of MatrixType objects,
      * instead of pointers.
      */
-    MGTransferAgglomeration(
-      const MGLevelObject<TrilinosWrappers::SparseMatrix> &transfer_matrices,
-      const std::vector<DoFHandler<dim> *>                &dof_handlers);
+    MGTransferAgglomeration(const MGLevelObject<MatrixType> &transfer_matrices,
+                            const std::vector<DoFHandler<dim> *> &dof_handlers);
 
 
     /**
@@ -513,10 +522,9 @@ namespace dealii
 
   private:
     /**
-     * Sequence of transfer operators, stored as pointers to Trilinos matrices.
+     * Sequence of transfer operators, stored as pointers to matrices.
      */
-    MGLevelObject<ObserverPointer<TrilinosWrappers::SparseMatrix>>
-      transfer_matrices;
+    MGLevelObject<ObserverPointer<MatrixType>> transfer_matrices;
 
     /**
      * Pointers to DoFHandler employe on the levels.

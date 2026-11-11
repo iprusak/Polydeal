@@ -1,0 +1,32 @@
+*** dim=2, degree=1, ranks=3 ***
+Total number of available levels: 4
+Starting level: 1
+Total agglomerates per (tree) level: 1: 6
+Total agglomerates per (tree) level: 2: 18
+Total agglomerates per (tree) level: 3: 66
+Total agglomerates per (tree) level: 4: 258
+Level 0: 24 DoFs, 384 nonzeros
+Level 1: 72 DoFs, 1440 nonzeros
+Level 2: 264 DoFs, 5952 nonzeros
+Level 3: 1032 DoFs, 24576 nonzeros
+Level 4: 4096 DoFs, 79872 nonzeros
+Host   CG+MG: 15 iterations, residual 1.24e-11
+Device CG+MG: 15 iterations, residual 1.24e-11
+Same iteration count: yes
+Solutions agree: OK
+*** dim=2, degree=2, ranks=3 ***
+Total number of available levels: 4
+Starting level: 1
+Total agglomerates per (tree) level: 1: 6
+Total agglomerates per (tree) level: 2: 18
+Total agglomerates per (tree) level: 3: 66
+Total agglomerates per (tree) level: 4: 258
+Level 0: 54 DoFs, 1944 nonzeros
+Level 1: 162 DoFs, 7290 nonzeros
+Level 2: 594 DoFs, 30132 nonzeros
+Level 3: 2322 DoFs, 124416 nonzeros
+Level 4: 9216 DoFs, 404352 nonzeros
+Host   CG+MG: 16 iterations, residual 4.05e-12
+Device CG+MG: 16 iterations, residual 4.05e-12
+Same iteration count: yes
+Solutions agree: OK
