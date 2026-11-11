@@ -1,0 +1,31 @@
+*** Serial check ***
+Serial vmult: OK
+Serial Tvmult: OK
+*** Distributed check, dim=2, degree=1, ranks=3 ***
+Coarse DoFs: 72, fine DoFs: 264
+Injection matrix: 264 x 72, nnz 1056 (device nnz 1056)
+Injection vmult (plain source): OK
+Injection vmult (domain layout): OK
+Injection vmult_add: OK
+Injection Tvmult: OK
+Injection Tvmult_add: OK
+SIP matrix: 264 x 264, nnz 5952 (device nnz 5952)
+SIP vmult: OK
+SIP Tvmult: OK
+SIP diagonal: OK
+SIP inverse diagonal: OK
+Device storage for the SIP matrix (forward + transpose): 144984 bytes
+*** Distributed check, dim=2, degree=2, ranks=3 ***
+Coarse DoFs: 162, fine DoFs: 594
+Injection matrix: 594 x 162, nnz 5346 (device nnz 5346)
+Injection vmult (plain source): OK
+Injection vmult (domain layout): OK
+Injection vmult_add: OK
+Injection Tvmult: OK
+Injection Tvmult_add: OK
+SIP matrix: 594 x 594, nnz 30132 (device nnz 30132)
+SIP vmult: OK
+SIP Tvmult: OK
+SIP diagonal: OK
+SIP inverse diagonal: OK
+Device storage for the SIP matrix (forward + transpose): 727944 bytes
